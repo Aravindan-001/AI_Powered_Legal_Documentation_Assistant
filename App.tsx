@@ -1,12 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
 import LandingPage from './components/LandingPage';
 import DocumentGenerator from './components/DocumentGenerator';
 import Dashboard from './components/Dashboard';
 import Auth from './components/Auth';
 import Toast from './components/Toast';
-import { LegalDocument, ToastMessage, DocStatus, User, RiskLevel } from './types';
+import { LegalDocument, ToastMessage, User } from './types';
+import { api } from './services/api';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'landing' | 'generator' | 'dashboard' | 'login' | 'signup'>('landing');
@@ -15,23 +16,31 @@ const App: React.FC = () => {
   const [documents, setDocuments] = useState<LegalDocument[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
+  const loadDocuments = useCallback(async () => {
+    try {
+      const docs = await api.fetchDocuments();
+      setDocuments(docs);
+    } catch (e) {
+      console.error("Critical error fetching documents:", e);
+      // Final safety net: try localStorage directly
+      const saved = localStorage.getItem('legal_docs');
+      if (saved) setDocuments(JSON.parse(saved));
+    }
+  }, []);
+
   // Initializations
   useEffect(() => {
-    const savedDocs = localStorage.getItem('legal_docs');
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark';
     const savedUser = localStorage.getItem('user');
 
-    if (savedDocs) setDocuments(JSON.parse(savedDocs));
     if (savedTheme) {
       setTheme(savedTheme);
       document.documentElement.classList.toggle('dark', savedTheme === 'dark');
     }
     if (savedUser) setUser(JSON.parse(savedUser));
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('legal_docs', JSON.stringify(documents));
-  }, [documents]);
+    
+    loadDocuments();
+  }, [loadDocuments]);
 
   const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
@@ -64,31 +73,23 @@ const App: React.FC = () => {
     setView('landing');
   };
 
-  const saveDocument = (docData: any) => {
-    const newDoc: LegalDocument = {
-      id: docData.id || Math.random().toString(36).substr(2, 9),
-      type: docData.type,
-      title: `${docData.type} - ${docData.fullName}`,
-      content: docData.content,
-      createdAt: docData.createdAt || new Date().toISOString(),
-      status: DocStatus.DRAFT,
-      riskLevel: docData.riskLevel || RiskLevel.LOW,
-      relevantActs: docData.relevantActs || ['Indian Contract Act, 1872'],
-      versionHistory: [{
-        id: '1',
-        timestamp: new Date().toISOString(),
-        content: docData.content,
-        author: user?.name || 'System'
-      }],
-      metadata: {
-        fullName: docData.fullName,
-        address: docData.address,
-        city: docData.city,
-        duration: docData.duration,
-        amount: docData.amount,
-      }
-    };
-    setDocuments(prev => [newDoc, ...prev]);
+  const onDocumentSave = (newDoc: any) => {
+    // Refresh list from the source of truth (api might have saved locally or to server)
+    setDocuments(prev => {
+      // Avoid duplicates if save returned a doc already in list
+      const exists = prev.find(d => d.id === newDoc.id);
+      if (exists) return prev;
+      return [newDoc, ...prev];
+    });
+  };
+
+  const handleDelete = (id: string) => {
+    if (window.confirm("Are you sure you want to delete this document?")) {
+      const updated = documents.filter(d => d.id !== id);
+      setDocuments(updated);
+      localStorage.setItem('legal_docs', JSON.stringify(updated));
+      addToast("Document removed from local archive.", "info");
+    }
   };
 
   return (
@@ -104,8 +105,14 @@ const App: React.FC = () => {
       
       <main className="flex-1">
         {view === 'landing' && <LandingPage onStart={() => setView('generator')} />}
-        {view === 'generator' && <DocumentGenerator onSave={saveDocument} addToast={addToast} />}
-        {view === 'dashboard' && <Dashboard documents={documents} onView={() => setView('generator')} onDelete={(id) => setDocuments(prev => prev.filter(d => d.id !== id))} />}
+        {view === 'generator' && <DocumentGenerator onSave={onDocumentSave} addToast={addToast} />}
+        {view === 'dashboard' && (
+          <Dashboard 
+            documents={documents} 
+            onView={() => setView('generator')} 
+            onDelete={handleDelete} 
+          />
+        )}
         {(view === 'login' || view === 'signup') && (
           <Auth 
             type={view} 

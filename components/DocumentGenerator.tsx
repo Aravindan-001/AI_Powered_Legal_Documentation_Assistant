@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { DocumentType, RiskLevel } from '../types';
-import { generateLegalDocument } from '../services/gemini';
+import { api } from '../services/api';
 
 interface DocumentGeneratorProps {
   onSave: (doc: any) => void;
@@ -19,7 +19,7 @@ const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({ onSave, addToast 
     amount: '',
     customClauses: ''
   });
-  const [generatedData, setGeneratedData] = useState<{content: string, risk: RiskLevel, acts: string[]} | null>(null);
+  const [generatedData, setGeneratedData] = useState<{content: string, riskLevel: RiskLevel, relevantActs: string[]} | null>(null);
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,31 +31,50 @@ const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({ onSave, addToast 
     setLoading(true);
     setGeneratedData(null);
     try {
-      const data = await generateLegalDocument(formData);
+      const data = await api.generateDocument({
+        documentType: formData.type,
+        fullName: formData.fullName,
+        address: formData.address,
+        cityState: formData.city,
+        duration: formData.duration,
+        amount: formData.amount,
+        additionalClauses: formData.customClauses
+      });
+      
       setGeneratedData(data);
       addToast('Draft generated with AI analysis.', 'success');
-      if (data.risk === RiskLevel.HIGH) {
+      if (data.riskLevel === RiskLevel.HIGH) {
         addToast('Warning: High risk clauses detected. Professional review recommended.', 'warning');
       }
     } catch (err) {
-      addToast('Failed to generate document.', 'error');
+      addToast('Failed to generate document. Ensure the server is running.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSaveLocal = () => {
+  const handleSaveToBackend = async () => {
     if (!generatedData) return;
-    onSave({
-      ...formData,
-      content: generatedData.content,
-      riskLevel: generatedData.risk,
-      relevantActs: generatedData.acts,
-      createdAt: new Date().toISOString(),
-      id: Math.random().toString(36).substr(2, 9),
-      status: 'Draft'
-    });
-    addToast('Document archived to dashboard.', 'success');
+    try {
+      const savedDoc = await api.saveDocument({
+        documentType: formData.type,
+        content: generatedData.content,
+        riskLevel: generatedData.riskLevel,
+        relevantActs: generatedData.relevantActs,
+        metadata: {
+          fullName: formData.fullName,
+          address: formData.address,
+          cityState: formData.city,
+          duration: formData.duration,
+          amount: formData.amount,
+          additionalClauses: formData.customClauses
+        }
+      });
+      onSave(savedDoc);
+      addToast('Document archived securely in database.', 'success');
+    } catch (err) {
+      addToast('Failed to save document to server.', 'error');
+    }
   };
 
   return (
@@ -183,16 +202,16 @@ const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({ onSave, addToast 
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 rounded-t-3xl no-print flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      generatedData.risk === RiskLevel.LOW ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' : 
-                      generatedData.risk === RiskLevel.MEDIUM ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' :
+                      generatedData.riskLevel === RiskLevel.LOW ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' : 
+                      generatedData.riskLevel === RiskLevel.MEDIUM ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' :
                       'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
                     }`}>
-                      Risk: {generatedData.risk}
+                      Risk: {generatedData.riskLevel}
                     </div>
                   </div>
                   <div className="flex space-x-2">
                     <button onClick={() => window.print()} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg></button>
-                    <button onClick={handleSaveLocal} className="px-5 py-2 bg-blue-900 dark:bg-blue-600 text-white text-xs font-bold rounded-lg hover:shadow-lg transition-all">Save Draft</button>
+                    <button onClick={handleSaveToBackend} className="px-5 py-2 bg-blue-900 dark:bg-blue-600 text-white text-xs font-bold rounded-lg hover:shadow-lg transition-all">Save Draft</button>
                   </div>
                 </div>
                 
@@ -204,7 +223,7 @@ const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({ onSave, addToast 
                   <div className="mt-12 pt-8 border-t border-slate-100 dark:border-slate-800 no-print">
                     <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Legal Act References</h4>
                     <div className="flex flex-wrap gap-2">
-                      {generatedData.acts.map((act, i) => (
+                      {generatedData.relevantActs.map((act, i) => (
                         <span key={i} className="px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs rounded-md border border-slate-200 dark:border-slate-700">
                           {act}
                         </span>

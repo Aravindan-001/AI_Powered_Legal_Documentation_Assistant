@@ -11,7 +11,10 @@
   "dependencies": {
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "@google/genai": "^1.41.0"
+    "@google/genai": "^1.41.0",
+    "cors": "^2.8.6",
+    "mongoose": "^9.2.1",
+    "express": "^5.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
